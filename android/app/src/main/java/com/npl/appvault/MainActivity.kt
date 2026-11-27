@@ -830,8 +830,7 @@ fun AppVaultRootScreen(vm: AppVaultViewModel, isWideScreen: Boolean) {
                         Column(modifier = Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
                             Icon(Icons.Default.Widgets, null, modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.primary)
                             Spacer(Modifier.height(10.dp))
-                            Text("選擇左側 App 即時編輯（支援自動儲存），
-點擊 App 圖示可直接啟動測試", color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
+                            Text("選擇左側 App 即時編輯（支援自動儲存），\n點擊 App 圖示可直接啟動測試", color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
                         }
                     }
                 }
@@ -1387,7 +1386,7 @@ fun AppRecordCard(
                             // GitHub Actions 編譯狀態燈號
                             if (app.actionsStatus.isNotBlank()) {
                                 Spacer(Modifier.width(5.dp))
-                                val (dotCol, tip) = when (app.actionsStatus) {
+                                val (dotCol, _) = when (app.actionsStatus) {
                                     "success" -> Color(0xFF10B981) to "編譯成功"
                                     "in_progress" -> Color(0xFFF59E0B) to "編譯中"
                                     "failure" -> Color(0xFFEF4444) to "編譯失敗"
