@@ -181,6 +181,7 @@ $existingSummary"""
                         val acc = matchedPkg?.iconBitmap?.let { extractDominantColorHex(it) }?.ifBlank { old.accentHex } ?: old.accentHex
 
                         current[idx] = old.copy(
+                            phoneAppLabel = matchedPkg?.label?.ifBlank { old.phoneAppLabel } ?: old.phoneAppLabel,
                             version = latestVer.ifBlank { old.version },
                             geminiLatestVersion = latestVer,
                             installedPhoneVersion = phoneVer,
@@ -212,6 +213,7 @@ $existingSummary"""
                         current.add(
                             inc.copy(
                                 id = java.util.UUID.randomUUID().toString(),
+                                phoneAppLabel = matchedPkg?.label ?: "",
                                 version = latestVer,
                                 geminiLatestVersion = latestVer,
                                 installedPhoneVersion = phoneVer,
@@ -541,13 +543,25 @@ $existingSummary"""
 
     fun togglePin(context: Context, app: AppRecord) = upsertApp(context, app.copy(isPinned = !app.isPinned), false, true)
     fun toggleInstalledPhone(context: Context, app: AppRecord) {
-        val prev = app.isInstalledOnPhone
-        upsertApp(context, app.copy(isInstalledOnPhone = !prev), false, true)
+        val wasMatched = app.isPhoneVersionMatched()
+        val targetVer = app.effectiveGeminiVersion()
+        val updated = if (!wasMatched) {
+            app.copy(
+                isInstalledOnPhone = true,
+                installedPhoneVersion = if (app.installedPhoneVersion.isNotBlank() || app.applicationId.isNotBlank()) targetVer else app.installedPhoneVersion
+            )
+        } else {
+            app.copy(
+                isInstalledOnPhone = false,
+                installedPhoneVersion = if (app.installedPhoneVersion == targetVer) "" else app.installedPhoneVersion
+            )
+        }
+        upsertApp(context, updated, false, true)
         showToast(
-            if (!prev) "「${app.name}」已標記為手機裝妥最新" else "「${app.name}」已改為手機待安裝",
+            if (!wasMatched) "「${app.displayTitle()}」已確認更新至最新版本" else "「${app.displayTitle()}」已取消最新勾選",
             actionLabel = "復原"
         ) {
-            upsertApp(context, app.copy(isInstalledOnPhone = prev), false, true)
+            upsertApp(context, app, false, true)
         }
     }
     fun toggleInstalledTablet(context: Context, app: AppRecord) = upsertApp(context, app.copy(isInstalledOnTablet = !app.isInstalledOnTablet), false, true)
@@ -564,6 +578,16 @@ $existingSummary"""
     fun exitBulkMode() {
         bulkSelectionMode = false
         selectedBulkIds = emptySet()
+    }
+
+    fun toggleSelectAllDisplayed() {
+        val visibleIds = displayedApps().map { it.id }.toSet()
+        bulkSelectionMode = true
+        selectedBulkIds = if (visibleIds.isNotEmpty() && selectedBulkIds.containsAll(visibleIds)) {
+            emptySet()
+        } else {
+            visibleIds
+        }
     }
 
     fun bulkSetCategory(context: Context, category: String) {
@@ -698,6 +722,7 @@ $existingSummary"""
                         val isLatestInstalled = match.versionName.isNotBlank() &&
                             compareSemanticVersions(match.versionName, app.version) >= 0
                         app.copy(
+                            phoneAppLabel = match.label.ifBlank { app.phoneAppLabel },
                             applicationId = app.applicationId.ifBlank { match.packageName },
                             iconBase64 = b64.ifBlank { app.iconBase64 },
                             accentHex = accent,
@@ -739,6 +764,7 @@ $existingSummary"""
                         val accent = match.iconBitmap?.let { extractDominantColorHex(it) }?.ifBlank { app.accentHex } ?: app.accentHex
                         val isLatest = match.versionName.isNotBlank() && compareSemanticVersions(match.versionName, app.version) >= 0
                         app.copy(
+                            phoneAppLabel = match.label.ifBlank { app.phoneAppLabel },
                             applicationId = app.applicationId.ifBlank { match.packageName },
                             iconBase64 = b64.ifBlank { app.iconBase64 },
                             accentHex = accent,

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'appvault-v2.0';
+const CACHE_NAME = 'appvault-v2.1';
 const ASSETS = ['./', './index.html', './manifest.json', './icon.svg'];
 
 self.addEventListener('install', e => {

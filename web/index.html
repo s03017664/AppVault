@@ -161,7 +161,8 @@
         <button class="btn" id="bulk-apply-cat">套用分類</button>
         <button class="btn" id="bulk-pub">標記已發 GitHub</button>
         <button class="btn" id="bulk-inst">標記手機已裝</button>
-        <button class="btn btn-danger" id="bulk-del">移至回收筒</button>
+        <button class="btn" id="bulk-select-all">全選</button>
+        <button class="btn btn-danger" id="bulk-del">批次刪除</button>
         <button class="btn" id="bulk-exit">取消</button>
       </div>
     </div>
@@ -725,10 +726,12 @@ function render() {
           ${bulkMode ? `<input type="checkbox" ${bulkIds.has(a.id)?'checked':''} style="width:18px;height:18px"/>` : ''}
           <span data-act="iconclick" title="${a.githubUrl?'點擊開啟 GitHub Repo':'點擊編輯'}">${renderIconHtml(a.name, a.iconBase64, prefs.compactMode?38:42)}</span>
           <div class="app-meta-col">
-            <div class="app-title">${isManual?'☰ ':''}${escapeHtml(a.name)}
+            <div class="app-title">${isManual?'☰ ':''}<strong style="font-weight:800">${escapeHtml(displayTitle(a))}</strong>
+  ${isVerMatched(a)
+    ? `<button type="button" class="mini-btn" data-act="inst" title="已吻合" style="border-color:rgba(16,185,129,.5);color:var(--green);font-weight:800">☑</button>`
+    : `<button type="button" class="mini-btn" data-act="inst" style="border-color:rgba(245,158,11,.5);color:var(--amber);font-weight:700">☐ 需要更新</button>`}
   <span class="ver-pill">Gemini v${escapeHtml(effectiveGemVer(a))}</span>
-  <span class="cat-pill" style="color:${isVerMatched(a)?'var(--green)':'var(--red)'}">${a.installedPhoneVersion ? '手機 v'+escapeHtml(a.installedPhoneVersion) : '手機未裝'}</span>
-  <button type="button" class="mini-btn" data-act="inst" style="border-color:${isVerMatched(a)?'rgba(16,185,129,.5)':'rgba(245,158,11,.5)'};color:${isVerMatched(a)?'var(--green)':'var(--amber)'}">${isVerMatched(a)?'☑ 吻合':'☐ 需更新'}</button> ${actDot}</div>
+  <span class="cat-pill" style="color:${isVerMatched(a)?'var(--green)':'var(--red)'}">${a.installedPhoneVersion ? '手機 v'+escapeHtml(a.installedPhoneVersion) : '手機未裝'}</span> ${actDot}</div>
             <div class="app-sub">
               <span class="cat-pill" style="background:${acc}20;color:${acc}">${escapeHtml(a.category||'個人工具')}</span>
               ${prefs.compactMode
@@ -753,7 +756,7 @@ function render() {
       else if (act) {
         e.stopPropagation();
         if (act==='pin') a.isPinned = !a.isPinned;
-        if (act==='inst') { const prev = a.isInstalledOnPhone; a.isInstalledOnPhone = !prev; toast(`「${a.name}」手機狀態已切換`, () => { a.isInstalledOnPhone = prev; saveLocal(); }); }
+        if (act==='inst') { const wasM = isVerMatched(a), gV = effectiveGemVer(a), prevI = a.isInstalledOnPhone, prevPV = a.installedPhoneVersion; if (!wasM) { a.isInstalledOnPhone = true; if (a.installedPhoneVersion || a.applicationId) a.installedPhoneVersion = gV; } else { a.isInstalledOnPhone = false; if (a.installedPhoneVersion === gV) a.installedPhoneVersion = ''; } toast(!wasM ? `「${displayTitle(a)}」已確認更新至最新` : `「${displayTitle(a)}」已取消勾選`, () => { a.isInstalledOnPhone = prevI; a.installedPhoneVersion = prevPV; saveLocal(); }); }
         if (act==='tab') a.isInstalledOnTablet = !a.isInstalledOnTablet;
         if (act==='gh') a.isPublishedOnGitHub = !a.isPublishedOnGitHub;
         if (act==='sync') a.supportsDesktopSync = !a.supportsDesktopSync;
@@ -918,6 +921,12 @@ document.getElementById('btn-toggle-compact').onclick = () => { prefs.compactMod
 document.getElementById('btn-toggle-dash').onclick = () => { prefs.dashExpanded = !prefs.dashExpanded; savePrefs(); render(); };
 document.getElementById('btn-toggle-bulk').onclick = () => { bulkMode = !bulkMode; bulkIds.clear(); render(); };
 document.getElementById('bulk-exit').onclick = () => { bulkMode = false; bulkIds.clear(); render(); };
+document.getElementById('bulk-select-all').onclick = () => {
+  const vis = getFiltered().map(x => x.id);
+  const allSel = vis.length > 0 && vis.every(id => bulkIds.has(id));
+  if (allSel) bulkIds.clear(); else vis.forEach(id => bulkIds.add(id));
+  render();
+};
 document.getElementById('bulk-apply-cat').onclick = () => { const c = document.getElementById('bulk-cat-sel').value; apps.forEach(a => { if (bulkIds.has(a.id)) { a.category=c; a.updatedAt=Date.now(); } }); bulkMode=false; bulkIds.clear(); saveLocal(); toast('已批次修改分類'); };
 document.getElementById('bulk-pub').onclick = () => { apps.forEach(a => { if (bulkIds.has(a.id)) { a.isPublishedOnGitHub=true; a.updatedAt=Date.now(); } }); bulkMode=false; bulkIds.clear(); saveLocal(); toast('已批次標記發布 GitHub'); };
 document.getElementById('bulk-inst').onclick = () => { apps.forEach(a => { if (bulkIds.has(a.id)) { a.isInstalledOnPhone=true; a.updatedAt=Date.now(); } }); bulkMode=false; bulkIds.clear(); saveLocal(); toast('已批次標記手機已裝'); };
@@ -1025,6 +1034,7 @@ async function autoGeminiCheckVersions(silent = true) {
 }
 
 
+function displayTitle(a) { return String(a.phoneAppLabel || a.name || '未命名 App').trim(); }
 function effectiveGemVer(a) { return String(a.geminiLatestVersion || a.version || '').trim(); }
 function isVerMatched(a) {
   const g = effectiveGemVer(a);
@@ -1220,7 +1230,7 @@ document.getElementById('btn-todo-md').onclick = async () => {
 };
 
 function download(blob, name){ const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name; a.click(); }
-document.getElementById('btn-export-json').onclick = () => download(new Blob([JSON.stringify({schemaVersion:8,exportedAt:Date.now(),customCategories:customCats,apps},null,2)],{type:'application/json'}),`AppVault_${new Date().toISOString().slice(0,16).replace(/[-T:]/g,'')}.json`);
+document.getElementById('btn-export-json').onclick = () => download(new Blob([JSON.stringify({schemaVersion:9,exportedAt:Date.now(),customCategories:customCats,apps},null,2)],{type:'application/json'}),`AppVault_${new Date().toISOString().slice(0,16).replace(/[-T:]/g,'')}.json`);
 document.getElementById('btn-export-csv').onclick = () => { const esc=s=>`"${String(s||'').replace(/"/g,'""')}"`; const r=['名稱,分類,版本,建立日期,介紹用法,已發GitHub,Actions狀態,手機已裝,平板已裝,桌面同步,同步ID,ApplicationId,KeystoreAlias,GitHub連結,備註',...activeApps().map(a=>[esc(a.name),esc(a.category),esc(a.version),esc(a.createdDate),esc(a.usageGuide),a.isPublishedOnGitHub?'是':'否',esc(a.actionsStatus),a.isInstalledOnPhone?'是':'否',a.isInstalledOnTablet?'是':'否',a.supportsDesktopSync?'是':'否',esc(a.syncId),esc(a.applicationId),esc(a.keystoreAlias),esc(a.githubUrl),esc(a.notes)].join(','))]; download(new Blob(['\uFEFF'+r.join('\n')],{type:'text/csv'}),`AppVault_${todayStr()}.csv`); };
 document.getElementById('btn-import-json').onclick = () => document.getElementById('file-input').click();
 document.getElementById('file-input').onchange = async e => {

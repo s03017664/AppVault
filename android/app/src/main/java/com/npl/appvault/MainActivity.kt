@@ -315,12 +315,15 @@ fun AppVaultRootScreen(vm: AppVaultViewModel, isWideScreen: Boolean) {
                     navigationIcon = {
                         IconButton(onClick = { vm.exitBulkMode() }) { Icon(Icons.Default.Close, "退出多選") }
                     },
-                    title = { Text("已選取 ${vm.selectedBulkIds.size} 項", fontWeight = FontWeight.Bold) },
+                    title = { Text("已選 ${vm.selectedBulkIds.size}/${list.size}", fontWeight = FontWeight.Bold) },
                     actions = {
-                        IconButton(onClick = { showBulkCatDialog = true }) { Icon(Icons.Default.Apps, "批次改分類") }
-                        IconButton(onClick = { vm.bulkSetPublished(context, true) }) { Icon(Icons.Default.CloudDone, "批次標記已發 GitHub") }
-                        IconButton(onClick = { vm.bulkSetInstalledPhone(context, true) }) { Icon(Icons.Default.PhoneAndroid, "批次標記手機已裝") }
-                        IconButton(onClick = { vm.bulkMoveToTrash(context) }) { Icon(Icons.Default.Delete, "批次移至回收筒") }
+                        TextButton(onClick = { vm.toggleSelectAllDisplayed() }) {
+                            val allSelected = list.isNotEmpty() && vm.selectedBulkIds.containsAll(list.map { it.id })
+                            Text(if (allSelected) "取消全選" else "全選", fontWeight = FontWeight.Bold)
+                        }
+                        IconButton(onClick = { showBulkCatDialog = true }, enabled = vm.selectedBulkIds.isNotEmpty()) { Icon(Icons.Default.Apps, "批次改分類") }
+                        IconButton(onClick = { vm.bulkSetInstalledPhone(context, true) }, enabled = vm.selectedBulkIds.isNotEmpty()) { Icon(Icons.Default.PhoneAndroid, "批次標記手機已裝") }
+                        IconButton(onClick = { vm.bulkMoveToTrash(context) }, enabled = vm.selectedBulkIds.isNotEmpty()) { Icon(Icons.Default.Delete, "批次刪除") }
                     }
                 )
             } else {
@@ -373,6 +376,12 @@ fun AppVaultRootScreen(vm: AppVaultViewModel, isWideScreen: Boolean) {
                         }
                         IconButton(onClick = { vm.oneTapSyncAll(context) }) {
                             Icon(Icons.Default.Sync, contentDescription = "一鍵同步更新", tint = Color(0xFF10B981))
+                        }
+                        IconButton(onClick = {
+                            vm.bulkSelectionMode = true
+                            vm.selectedBulkIds = emptySet()
+                        }) {
+                            Icon(Icons.Default.Checklist, contentDescription = "多選／全選刪除")
                         }
                         Box {
                             IconButton(onClick = { showMoreMenu = true }) { Icon(Icons.Default.MoreVert, "更多") }
@@ -1409,58 +1418,58 @@ fun AppRecordCard(
 
                     Spacer(Modifier.width(10.dp))
                     Column(modifier = Modifier.weight(1f)) {
+                        val titleStr = app.displayTitle()
+                        val gemVer = app.effectiveGeminiVersion()
+                        val phoneVerLabel = if (app.installedPhoneVersion.isNotBlank()) "手機v${app.installedPhoneVersion}" else "手機未裝"
+                        val matched = app.isPhoneVersionMatched()
+
+                        // 第一行：跟回手機名稱的粗體字一開頭 + 精簡勾選狀態（吻合只顯示 tick；不吻合顯示 ☐ 需要更新）
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                app.name.ifBlank { "未命名 App" },
-                                style = if (compactMode) MaterialTheme.typography.titleSmall else MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
+                                titleStr,
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.ExtraBold,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.weight(1f, fill = false)
                             )
                             Spacer(Modifier.width(6.dp))
-                            val gemVer = app.effectiveGeminiVersion()
-                            val phoneVerLabel = if (app.installedPhoneVersion.isNotBlank()) "手機v${app.installedPhoneVersion}" else "手機未裝"
-                            val matched = app.isPhoneVersionMatched()
-                            Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = RoundedCornerShape(6.dp)) {
-                                Text("Gemini v$gemVer", modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold)
-                            }
-                            Spacer(Modifier.width(4.dp))
-                            Surface(
-                                color = if (matched) Color(0xFF10B981).copy(alpha = 0.14f) else Color(0xFFEF4444).copy(alpha = 0.14f),
-                                shape = RoundedCornerShape(6.dp)
-                            ) {
-                                Text(
-                                    phoneVerLabel,
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = if (matched) Color(0xFF10B981) else Color(0xFFEF4444)
-                                )
-                            }
-                            Spacer(Modifier.width(4.dp))
-                            Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = if (matched) Color(0xFF10B981).copy(alpha = 0.20f) else Color(0xFFF59E0B).copy(alpha = 0.20f),
-                                modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { onTogglePhone() }
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                    verticalAlignment = Alignment.CenterVertically
+                            if (matched) {
+                                IconButton(
+                                    onClick = onTogglePhone,
+                                    modifier = Modifier.size(26.dp)
                                 ) {
                                     Icon(
-                                        if (matched) Icons.Default.CheckBox else Icons.Default.CheckBoxOutlineBlank,
-                                        contentDescription = if (matched) "版本已吻合" else "版本不吻合需更新",
-                                        tint = if (matched) Color(0xFF10B981) else Color(0xFFF59E0B),
-                                        modifier = Modifier.size(15.dp)
+                                        Icons.Default.CheckBox,
+                                        contentDescription = "已吻合",
+                                        tint = Color(0xFF10B981),
+                                        modifier = Modifier.size(19.dp)
                                     )
-                                    Spacer(Modifier.width(3.dp))
-                                    Text(
-                                        if (matched) "吻合" else "需更新",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        fontWeight = FontWeight.Bold,
-                                        color = if (matched) Color(0xFF10B981) else Color(0xFFF59E0B)
-                                    )
+                                }
+                            } else {
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = Color(0xFFF59E0B).copy(alpha = 0.20f),
+                                    modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { onTogglePhone() }
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            Icons.Default.CheckBoxOutlineBlank,
+                                            contentDescription = "需要更新",
+                                            tint = Color(0xFFF59E0B),
+                                            modifier = Modifier.size(15.dp)
+                                        )
+                                        Spacer(Modifier.width(3.dp))
+                                        Text(
+                                            "需要更新",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFFF59E0B)
+                                        )
+                                    }
                                 }
                             }
                             Spacer(Modifier.width(6.dp))
@@ -1506,8 +1515,23 @@ fun AppRecordCard(
                                 )
                             }
                         }
-                        Spacer(Modifier.height(2.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Spacer(Modifier.height(3.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                            Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = RoundedCornerShape(5.dp)) {
+                                Text("Gemini v$gemVer", modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold)
+                            }
+                            Surface(
+                                color = if (matched) Color(0xFF10B981).copy(alpha = 0.14f) else Color(0xFFEF4444).copy(alpha = 0.14f),
+                                shape = RoundedCornerShape(5.dp)
+                            ) {
+                                Text(
+                                    phoneVerLabel,
+                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = if (matched) Color(0xFF10B981) else Color(0xFFEF4444)
+                                )
+                            }
                             Surface(color = accentColor.copy(alpha = 0.14f), shape = RoundedCornerShape(5.dp)) {
                                 Text(app.category, modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp), style = MaterialTheme.typography.labelSmall, color = accentColor)
                             }
@@ -1685,6 +1709,7 @@ fun AppEditorPanel(
         isInstalledOnTablet = installedTablet,
         supportsDesktopSync = desktopSync,
         syncId = if (desktopSync) extractSyncIdFromRaw(syncId) else syncId.trim(),
+        phoneAppLabel = if (applicationId.isNotBlank() && name.isNotBlank()) name.trim() else initial.phoneAppLabel,
         applicationId = applicationId.trim(),
         keystoreAlias = keystoreAlias.trim(),
         apkHash = apkHash.trim(),
@@ -1914,7 +1939,7 @@ fun AppEditorPanel(
                                 color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
                                 modifier = Modifier.fillMaxWidth().clickable {
                                     applicationId = pkg.packageName
-                                    if (name.isBlank()) name = pkg.label
+                                    if (pkg.label.isNotBlank()) name = pkg.label
                                     if (pkg.versionName.isNotBlank()) {
                                         installedPhoneVersion = pkg.versionName
                                         if (compareSemanticVersions(pkg.versionName, version) >= 0) installedPhone = true

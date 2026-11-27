@@ -49,6 +49,7 @@ data class AppRecord(
     val usageGuide: String = "",
     val iconBase64: String = "",
     val accentHex: String = "",
+    val phoneAppLabel: String = "",
     val installedPhoneVersion: String = "",
     val geminiLatestVersion: String = "",
     val isPinned: Boolean = false,
@@ -75,7 +76,7 @@ data class AppRecord(
 
 @Serializable
 data class AppVaultBackup(
-    val schemaVersion: Int = 8,
+    val schemaVersion: Int = 9,
     val exportedAt: Long = System.currentTimeMillis(),
     val customCategories: List<String> = emptyList(),
     val apps: List<AppRecord> = emptyList()
@@ -147,6 +148,10 @@ fun todayDateString(): String = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault
 
 fun timestampToDateString(ts: Long): String = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(ts))
 
+
+
+fun AppRecord.displayTitle(): String =
+    phoneAppLabel.trim().ifBlank { name.trim() }.ifBlank { "未命名 App" }
 
 fun AppRecord.effectiveGeminiVersion(): String =
     geminiLatestVersion.trim().ifBlank { version.trim() }
