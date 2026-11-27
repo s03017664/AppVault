@@ -158,7 +158,13 @@ $existingSummary"""
                                 (incNorm.isNotBlank() && normalizeAppNameKey(pkg.label) == incNorm)
                         }
                         val phoneVer = matchedPkg?.versionName?.ifBlank { old.installedPhoneVersion } ?: old.installedPhoneVersion
-                        val latestVer = inc.version.trim().ifBlank { old.version.trim() }
+                        val candidateList = listOfNotNull(
+                            inc.version.trim().takeIf { it.isNotBlank() },
+                            old.version.trim().takeIf { it.isNotBlank() },
+                            old.geminiLatestVersion.trim().takeIf { it.isNotBlank() },
+                            phoneVer.trim().takeIf { it.isNotBlank() }
+                        )
+                        val latestVer = candidateList.maxWithOrNull { a, b -> compareSemanticVersions(a, b) } ?: "1.0"
                         val isNewer = latestVer.isNotBlank() && compareSemanticVersions(latestVer, old.version) > 0
                         val newLog = if (isNewer) {
                             bumpedApps.add("${old.name} 手機v${phoneVer.ifBlank { "?" }} / Gemini v$latestVer")

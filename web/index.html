@@ -1035,7 +1035,7 @@ async function autoGeminiCheckVersions(silent = true) {
 
 
 function displayTitle(a) { return String(a.phoneAppLabel || a.name || '未命名 App').trim(); }
-function effectiveGemVer(a) { return String(a.geminiLatestVersion || a.version || '').trim(); }
+function effectiveGemVer(a) { const g = String(a.geminiLatestVersion || a.version || '').trim(), p = String(a.installedPhoneVersion || '').trim(); if (!g) return p; if (p && semverCmp(p, g) > 0) return p; return g; }
 function isVerMatched(a) {
   const g = effectiveGemVer(a);
   if (!g) return Boolean(a.isInstalledOnPhone);
@@ -1230,7 +1230,7 @@ document.getElementById('btn-todo-md').onclick = async () => {
 };
 
 function download(blob, name){ const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name; a.click(); }
-document.getElementById('btn-export-json').onclick = () => download(new Blob([JSON.stringify({schemaVersion:10,exportedAt:Date.now(),customCategories:customCats,apps},null,2)],{type:'application/json'}),`AppVault_${new Date().toISOString().slice(0,16).replace(/[-T:]/g,'')}.json`);
+document.getElementById('btn-export-json').onclick = () => download(new Blob([JSON.stringify({schemaVersion:11,exportedAt:Date.now(),customCategories:customCats,apps},null,2)],{type:'application/json'}),`AppVault_${new Date().toISOString().slice(0,16).replace(/[-T:]/g,'')}.json`);
 document.getElementById('btn-export-csv').onclick = () => { const esc=s=>`"${String(s||'').replace(/"/g,'""')}"`; const r=['名稱,分類,版本,建立日期,介紹用法,已發GitHub,Actions狀態,手機已裝,平板已裝,桌面同步,同步ID,ApplicationId,KeystoreAlias,GitHub連結,備註',...activeApps().map(a=>[esc(a.name),esc(a.category),esc(a.version),esc(a.createdDate),esc(a.usageGuide),a.isPublishedOnGitHub?'是':'否',esc(a.actionsStatus),a.isInstalledOnPhone?'是':'否',a.isInstalledOnTablet?'是':'否',a.supportsDesktopSync?'是':'否',esc(a.syncId),esc(a.applicationId),esc(a.keystoreAlias),esc(a.githubUrl),esc(a.notes)].join(','))]; download(new Blob(['\uFEFF'+r.join('\n')],{type:'text/csv'}),`AppVault_${todayStr()}.csv`); };
 document.getElementById('btn-import-json').onclick = () => document.getElementById('file-input').click();
 document.getElementById('file-input').onchange = async e => {

@@ -76,7 +76,7 @@ data class AppRecord(
 
 @Serializable
 data class AppVaultBackup(
-    val schemaVersion: Int = 10,
+    val schemaVersion: Int = 11,
     val exportedAt: Long = System.currentTimeMillis(),
     val customCategories: List<String> = emptyList(),
     val apps: List<AppRecord> = emptyList()
@@ -153,8 +153,13 @@ fun timestampToDateString(ts: Long): String = SimpleDateFormat("yyyy-MM-dd", Loc
 fun AppRecord.displayTitle(): String =
     phoneAppLabel.trim().ifBlank { name.trim() }.ifBlank { "未命名 App" }
 
-fun AppRecord.effectiveGeminiVersion(): String =
-    geminiLatestVersion.trim().ifBlank { version.trim() }
+fun AppRecord.effectiveGeminiVersion(): String {
+    val g = geminiLatestVersion.trim().ifBlank { version.trim() }
+    val p = installedPhoneVersion.trim()
+    if (g.isBlank()) return p
+    if (p.isNotBlank() && compareSemanticVersions(p, g) > 0) return p
+    return g
+}
 
 fun AppRecord.isPhoneVersionMatched(): Boolean {
     val targetVer = effectiveGeminiVersion()
