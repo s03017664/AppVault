@@ -284,8 +284,8 @@ $existingSummary"""
 
         ReleaseCheckWorker.schedule(context, bgCheckEnabled)
 
+        syncInstalledApks(context, silent = true)
         if (autoGeminiOnStart && geminiApiKey.isNotBlank()) {
-            syncInstalledApks(context, silent = true)
             autoCheckLatestVersionsFromGemini(context, silent = true)
         }
         if (gistToken.isNotBlank() && gistId.isNotBlank()) {
@@ -710,10 +710,15 @@ $existingSummary"""
                     if (app.deletedAt != null) return@map app
                     val normApp = normalizeAppNameKey(app.name)
                     val match = installed.find { pkg ->
+                        val normPkgLabel = normalizeAppNameKey(pkg.label)
+                        val normPkgTail = pkg.packageName.substringAfterLast('.').lowercase(Locale.getDefault())
                         (app.applicationId.isNotBlank() && pkg.packageName.equals(app.applicationId, true)) ||
-                            (normApp.isNotBlank() && (normalizeAppNameKey(pkg.label) == normApp ||
-                                normalizeAppNameKey(pkg.label).contains(normApp) ||
-                                normApp.contains(normalizeAppNameKey(pkg.label))))
+                            (normApp.isNotBlank() && normPkgLabel.isNotBlank() && (
+                                normPkgLabel == normApp ||
+                                (normApp.length >= 3 && normPkgLabel.contains(normApp)) ||
+                                (normPkgLabel.length >= 3 && normApp.contains(normPkgLabel))
+                            )) ||
+                            (normApp.length >= 4 && normPkgTail.length >= 4 && (normApp.contains(normPkgTail) || normPkgTail.contains(normApp)))
                     }
                     if (match != null) {
                         matchedCount++
@@ -753,10 +758,15 @@ $existingSummary"""
                     if (app.deletedAt != null) return@map app
                     val normApp = normalizeAppNameKey(app.name)
                     val match = installed.find { pkg ->
+                        val normPkgLabel = normalizeAppNameKey(pkg.label)
+                        val normPkgTail = pkg.packageName.substringAfterLast('.').lowercase(Locale.getDefault())
                         (app.applicationId.isNotBlank() && pkg.packageName.equals(app.applicationId, true)) ||
-                            (normApp.isNotBlank() && (normalizeAppNameKey(pkg.label) == normApp ||
-                                normalizeAppNameKey(pkg.label).contains(normApp) ||
-                                normApp.contains(normalizeAppNameKey(pkg.label))))
+                            (normApp.isNotBlank() && normPkgLabel.isNotBlank() && (
+                                normPkgLabel == normApp ||
+                                (normApp.length >= 3 && normPkgLabel.contains(normApp)) ||
+                                (normPkgLabel.length >= 3 && normApp.contains(normPkgLabel))
+                            )) ||
+                            (normApp.length >= 4 && normPkgTail.length >= 4 && (normApp.contains(normPkgTail) || normPkgTail.contains(normApp)))
                     }
                     if (match != null) {
                         apkMatched++

@@ -36,8 +36,8 @@
     .brand img { width: 34px; height: 34px; }
     .sync-pill { font-size: 0.74rem; color: var(--muted); display: flex; align-items: center; gap: 6px; margin: 2px 0 8px 4px; }
     .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
-    .ver-pill { font-size: 0.72rem; padding: 2px 8px; border-radius: 999px; background: color-mix(in srgb, var(--primary) 18%, transparent); color: var(--primary); font-weight: 700; }
-    .cat-pill { font-size: 0.7rem; padding: 2px 7px; border-radius: 6px; background: var(--surface2); color: var(--muted); font-weight: 600; }
+    .ver-pill { font-size: 0.8rem; padding: 3px 9px; border-radius: 999px; background: color-mix(in srgb, var(--primary) 18%, transparent); color: var(--primary); font-weight: 700; }
+    .cat-pill { font-size: 0.8rem; padding: 3px 8px; border-radius: 6px; background: var(--surface2); color: var(--muted); font-weight: 600; }
     .nav-btn { border: none; background: transparent; color: var(--text); text-align: left; padding: 8px 11px; border-radius: 10px; cursor: pointer; font-weight: 600; display: flex; justify-content: space-between; align-items: center; }
     .nav-btn:hover, .nav-btn.active { background: var(--surface2); color: var(--primary); }
     .main { padding: 18px 20px; overflow-y: auto; }
@@ -73,8 +73,8 @@
     .app-icon-fallback { width: 40px; height: 40px; border-radius: 10px; display: grid; place-items: center; font-weight: 800; font-size: 0.88rem; flex-shrink: 0; }
     .app-meta-col { flex: 1; min-width: 0; }
     .app-title { font-weight: 700; font-size: 1rem; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-    .app-sub { font-size: 0.75rem; color: var(--muted); display: flex; gap: 8px; flex-wrap: wrap; margin-top: 2px; align-items: center; }
-    .usage-line { font-size: 0.81rem; color: var(--muted); margin-top: 5px; line-height: 1.38; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .app-sub { font-size: 0.84rem; color: var(--muted); display: flex; gap: 7px; flex-wrap: wrap; margin-top: 5px; align-items: center; }
+    .usage-line { font-size: 0.9rem; color: var(--muted); margin-top: 7px; line-height: 1.38; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
     .app-card.compact .usage-line { -webkit-line-clamp: 1; }
     .star-btn { background: none; border: none; font-size: 1.15rem; cursor: pointer; padding: 0 4px; color: var(--muted); }
     .star-btn.pinned { color: var(--amber); }
@@ -1230,7 +1230,7 @@ document.getElementById('btn-todo-md').onclick = async () => {
 };
 
 function download(blob, name){ const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name; a.click(); }
-document.getElementById('btn-export-json').onclick = () => download(new Blob([JSON.stringify({schemaVersion:9,exportedAt:Date.now(),customCategories:customCats,apps},null,2)],{type:'application/json'}),`AppVault_${new Date().toISOString().slice(0,16).replace(/[-T:]/g,'')}.json`);
+document.getElementById('btn-export-json').onclick = () => download(new Blob([JSON.stringify({schemaVersion:10,exportedAt:Date.now(),customCategories:customCats,apps},null,2)],{type:'application/json'}),`AppVault_${new Date().toISOString().slice(0,16).replace(/[-T:]/g,'')}.json`);
 document.getElementById('btn-export-csv').onclick = () => { const esc=s=>`"${String(s||'').replace(/"/g,'""')}"`; const r=['名稱,分類,版本,建立日期,介紹用法,已發GitHub,Actions狀態,手機已裝,平板已裝,桌面同步,同步ID,ApplicationId,KeystoreAlias,GitHub連結,備註',...activeApps().map(a=>[esc(a.name),esc(a.category),esc(a.version),esc(a.createdDate),esc(a.usageGuide),a.isPublishedOnGitHub?'是':'否',esc(a.actionsStatus),a.isInstalledOnPhone?'是':'否',a.isInstalledOnTablet?'是':'否',a.supportsDesktopSync?'是':'否',esc(a.syncId),esc(a.applicationId),esc(a.keystoreAlias),esc(a.githubUrl),esc(a.notes)].join(','))]; download(new Blob(['\uFEFF'+r.join('\n')],{type:'text/csv'}),`AppVault_${todayStr()}.csv`); };
 document.getElementById('btn-import-json').onclick = () => document.getElementById('file-input').click();
 document.getElementById('file-input').onchange = async e => {

@@ -76,7 +76,7 @@ data class AppRecord(
 
 @Serializable
 data class AppVaultBackup(
-    val schemaVersion: Int = 9,
+    val schemaVersion: Int = 10,
     val exportedAt: Long = System.currentTimeMillis(),
     val customCategories: List<String> = emptyList(),
     val apps: List<AppRecord> = emptyList()
