@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>AppVault v1.8 - 開發總管</title>
+  <title>AppVault v1.9 - 開發總管</title>
   <link rel="manifest" href="./manifest.json" />
   <link rel="icon" type="image/svg+xml" href="./icon.svg" />
   <style>
@@ -277,7 +277,7 @@
 <div class="modal-bg" id="mig-modal">
   <div class="modal">
     <h3 style="margin:0">🔐 跨裝置設定加密 QR 遷移</h3>
-    <small style="color:var(--muted)">使用 AES-256-GCM 加密打包 GitHub Token、Gist ID 與 Gemini Key，與 Android AppVault v1.8 完全互通。</small>
+    <small style="color:var(--muted)">使用 AES-256-GCM 加密打包 GitHub Token、Gist ID 與 Gemini Key，與 Android AppVault v1.9 完全互通。</small>
     <input type="password" id="mig-pin" placeholder="輸入臨時 PIN 碼（至少 4 位）" />
     <div style="display:flex;gap:8px">
       <button type="button" class="btn btn-primary" id="mig-export-btn" style="flex:1">產生加密 QR / 遷移碼</button>
@@ -325,7 +325,8 @@
       <button type="button" class="btn btn-primary" id="gem-parse-json" style="flex:1">解析 JSON 並即時更新</button>
     </div>
     <hr style="border-color:var(--border);width:100%" />
-    <input type="password" id="gem-api-key" placeholder="選填：Gemini API Key（用於解析純文字）" />
+    <label class="check-row"><input type="checkbox" id="gem-auto-start" /> 開啟網頁時自動連 Gemini 查最新版本（有新版自動取消「最新」勾選）</label>
+    <input type="password" id="gem-api-key" placeholder="Gemini API Key（啟用自動查版必填）" />
     <div style="display:flex;gap:8px">
       <button type="button" class="btn" id="gem-ai-extract" style="flex:1">🤖 Gemini API 萃取</button>
       <button type="button" class="btn" id="gem-close">關閉</button>
@@ -446,11 +447,11 @@ async function decryptMigration(code, pin) {
 }
 
 // 狀態管理與記憶
-const STORAGE_KEY = 'appvault_v1_data', CAT_KEY = 'appvault_custom_cats', PREFS_KEY = 'appvault_ui_prefs_v18';
+const STORAGE_KEY = 'appvault_v1_data', CAT_KEY = 'appvault_custom_cats', PREFS_KEY = 'appvault_ui_prefs_v19';
 const BASE_CATS = ['教學工具', '個人工具', '生活記錄', '系統工具', 'AI 與開發', '相片媒體', '其他'];
 let apps = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
 let customCats = JSON.parse(localStorage.getItem(CAT_KEY) || '[]');
-let prefs = Object.assign({ filterMode:'ALL', selectedCategory:'全部', sortMode:'MANUAL', sortAsc:true, compactMode:true, dashExpanded:true, themeMode:'system', accent:'OCEAN', autoSync:true }, JSON.parse(localStorage.getItem(PREFS_KEY)||'{}'));
+let prefs = Object.assign({ filterMode:'ALL', selectedCategory:'全部', sortMode:'MANUAL', sortAsc:true, compactMode:true, dashExpanded:true, themeMode:'system', accent:'OCEAN', autoSync:true, autoGeminiOnStart:true, autoGeminiOnStart:true, lastGeminiCheck:'' }, JSON.parse(localStorage.getItem(PREFS_KEY)||'{}'));
 let selectedId = null, dragId = null, bulkMode = false, bulkIds = new Set(), autoSyncTimer = null, autoSaveTimer = null;
 
 function savePrefs() { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)); }
@@ -724,7 +725,10 @@ function render() {
           ${bulkMode ? `<input type="checkbox" ${bulkIds.has(a.id)?'checked':''} style="width:18px;height:18px"/>` : ''}
           <span data-act="iconclick" title="${a.githubUrl?'點擊開啟 GitHub Repo':'點擊編輯'}">${renderIconHtml(a.name, a.iconBase64, prefs.compactMode?38:42)}</span>
           <div class="app-meta-col">
-            <div class="app-title">${isManual?'☰ ':''}${escapeHtml(a.name)} <span class="ver-pill">v${escapeHtml(a.version)}</span> ${actDot}</div>
+            <div class="app-title">${isManual?'☰ ':''}${escapeHtml(a.name)}
+  <span class="ver-pill">Gemini v${escapeHtml(effectiveGemVer(a))}</span>
+  <span class="cat-pill" style="color:${isVerMatched(a)?'var(--green)':'var(--red)'}">${a.installedPhoneVersion ? '手機 v'+escapeHtml(a.installedPhoneVersion) : '手機未裝'}</span>
+  <button type="button" class="mini-btn" data-act="inst" style="border-color:${isVerMatched(a)?'rgba(16,185,129,.5)':'rgba(245,158,11,.5)'};color:${isVerMatched(a)?'var(--green)':'var(--amber)'}">${isVerMatched(a)?'☑ 吻合':'☐ 需更新'}</button> ${actDot}</div>
             <div class="app-sub">
               <span class="cat-pill" style="background:${acc}20;color:${acc}">${escapeHtml(a.category||'個人工具')}</span>
               ${prefs.compactMode
@@ -967,6 +971,117 @@ document.querySelectorAll('[data-tmode]').forEach(b => b.onclick = () => { prefs
 document.querySelectorAll('[data-accent]').forEach(b => b.onclick = () => { prefs.accent=b.dataset.accent; savePrefs(); applyAppearance(); });
 
 // Gemini / Gist / Batch / Cat / Trash / QR / Import-Export 事件
+
+async function autoGeminiCheckVersions(silent = true) {
+  const key = (localStorage.getItem('appvault_gemini_key') || '').trim();
+  if (!key) { if (!silent) toast('請先在「連動 Gemini 紀錄」填入 Gemini API Key'); return; }
+  const known = activeApps().map(a => `${a.name}(目前v${a.version}, 建立:${a.createdDate||''}, 包名:${a.applicationId||''})`).join('、');
+  if (!silent) toast('正在自動連線 Gemini 檢查最新版本...');
+  try {
+    const prompt = `你是個人的 App 版本追蹤助理。請針對以下我開發的 Apps，回報它們目前最新的版本號（若無最新變動則保留原版本號），並補齊建立日期與簡短介紹用法。只輸出標準 JSON 陣列（欄位：name, version, createdDate, category, usageGuide, supportsDesktopSync, isPublishedOnGitHub, githubUrl, applicationId, notes）。\n現有 Apps：${known}`;
+    const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${encodeURIComponent(key)}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const d = await r.json();
+    const parsed = parseGeminiText(d.candidates?.[0]?.content?.parts?.[0]?.text || '');
+    if (!parsed.length) return;
+    let bumped = [], added = 0, nextOrd = apps.length ? Math.max(...apps.map(x => x.sortOrder||0)) + 1 : 0;
+    parsed.forEach(inc => {
+      const k = normKey(inc.name);
+      const old = activeApps().find(a => a.name.toLowerCase() === inc.name.toLowerCase() || (k && (normKey(a.name) === k || normKey(a.name).includes(k) || k.includes(normKey(a.name)))));
+      if (inc.category && !allCategories().includes(inc.category)) customCats.push(inc.category);
+      if (old) {
+        const isNewer = inc.version && semverCmp(inc.version, old.version) > 0;
+        if (isNewer) {
+          bumped.push(`${old.name} ${old.version}→${inc.version}`);
+          old.changelog = old.changelog || [];
+          old.changelog.unshift({ version: old.version, notes: old.notes || `Gemini 自動偵測升版至 v${inc.version}`, timestamp: old.updatedAt || Date.now() });
+          old.version = inc.version;
+          old.isInstalledOnPhone = false;
+          old.isInstalledOnTablet = false;
+          old.updatedAt = Date.now();
+        } else {
+          old.version = old.version || inc.version;
+        }
+        old.createdDate = old.createdDate || inc.createdDate;
+        old.category = inc.category || old.category;
+        old.usageGuide = inc.usageGuide || old.usageGuide;
+        old.githubUrl = old.githubUrl || inc.githubUrl;
+        old.applicationId = old.applicationId || inc.applicationId;
+      } else {
+        apps.push({ id: crypto.randomUUID(), ...inc, iconBase64:'', accentHex:'', installedPhoneVersion:'', isPinned:false, isInstalledOnPhone:false, isInstalledOnTablet:false, lastGistUpdatedAt:'', keystoreAlias:'', apkHash:'', latestGitHubVersion:'', actionsStatus:'', actionsRunTitle:'', changelog:[], sortOrder:nextOrd++, updatedAt:Date.now(), deletedAt:null });
+        added++;
+      }
+    });
+    const now = new Date();
+    prefs.lastGeminiCheck = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+    savePrefs();
+    saveLocal(bumped.length > 0 || added > 0);
+    if (bumped.length) toast(`🔔 偵測到新版本（已自動取消「最新」勾選）：${bumped.slice(0,3).join('、')}`);
+    else if (!silent) toast(`✓ Gemini 查版完成（新增 ${added} 款，其餘已是記錄最新版本）`);
+  } catch (e) { if (!silent) toast('Gemini 自動查版失敗：' + e.message); }
+}
+
+
+function effectiveGemVer(a) { return String(a.geminiLatestVersion || a.version || '').trim(); }
+function isVerMatched(a) {
+  const g = effectiveGemVer(a);
+  if (!g) return Boolean(a.isInstalledOnPhone);
+  if (a.installedPhoneVersion) return semverCmp(a.installedPhoneVersion, g) === 0;
+  return Boolean(a.isInstalledOnPhone) && semverCmp(a.version, g) === 0;
+}
+
+async function autoGeminiCheckVersions(silent = true) {
+  const key = (localStorage.getItem('appvault_gemini_key') || '').trim();
+  if (!key) { if (!silent) toast('請先在「連動 Gemini 紀錄」填入 Gemini API Key'); return; }
+  const known = activeApps().map(a => `${a.name}(記錄v${a.version}, 手機現裝:${a.installedPhoneVersion||'未知'}, 建立:${a.createdDate||''})`).join('、');
+  if (!silent) toast('正在自動連線 Gemini 檢查最新版本...');
+  try {
+    const prompt = `你是個人的 App 版本追蹤助理。請針對以下我開發的 Apps，回報它們目前最新的版本號（若無最新變動則保留原版本號），並補齊建立日期與簡短介紹用法。只輸出標準 JSON 陣列（欄位：name, version, createdDate, category, usageGuide, supportsDesktopSync, isPublishedOnGitHub, githubUrl, applicationId, notes）。\n現有 Apps：${known}`;
+    const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${encodeURIComponent(key)}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const d = await r.json();
+    const parsed = parseGeminiText(d.candidates?.[0]?.content?.parts?.[0]?.text || '');
+    if (!parsed.length) return;
+    let bumped = [], added = 0, nextOrd = apps.length ? Math.max(...apps.map(x => x.sortOrder||0)) + 1 : 0;
+    parsed.forEach(inc => {
+      const k = normKey(inc.name);
+      const old = activeApps().find(a => a.name.toLowerCase() === inc.name.toLowerCase() || (k && (normKey(a.name) === k || normKey(a.name).includes(k) || k.includes(normKey(a.name)))));
+      if (inc.category && !allCategories().includes(inc.category)) customCats.push(inc.category);
+      if (old) {
+        const latestV = (inc.version || old.version || '').trim();
+        const isNewer = latestV && semverCmp(latestV, old.version) > 0;
+        if (isNewer) {
+          bumped.push(`${old.name} (手機${old.installedPhoneVersion||'?'} / Gemini v${latestV})`);
+          old.changelog = old.changelog || [];
+          old.changelog.unshift({ version: old.version, notes: old.notes || `Gemini 最新 v${latestV}`, timestamp: old.updatedAt || Date.now() });
+          old.version = latestV;
+          old.updatedAt = Date.now();
+        }
+        old.geminiLatestVersion = latestV;
+        old.createdDate = old.createdDate || inc.createdDate;
+        old.category = inc.category || old.category;
+        old.usageGuide = inc.usageGuide || old.usageGuide;
+        old.githubUrl = old.githubUrl || inc.githubUrl;
+        old.applicationId = old.applicationId || inc.applicationId;
+        old.isInstalledOnPhone = old.installedPhoneVersion ? (semverCmp(old.installedPhoneVersion, latestV) === 0) : (!isNewer && Boolean(old.isInstalledOnPhone));
+      } else {
+        const latestV = (inc.version || '1.0').trim();
+        apps.push({ id: crypto.randomUUID(), ...inc, version: latestV, geminiLatestVersion: latestV, iconBase64:'', accentHex:'', installedPhoneVersion:'', isPinned:false, isInstalledOnPhone:false, isInstalledOnTablet:false, lastGistUpdatedAt:'', keystoreAlias:'', apkHash:'', latestGitHubVersion:'', actionsStatus:'', actionsRunTitle:'', changelog:[], sortOrder:nextOrd++, updatedAt:Date.now(), deletedAt:null });
+        added++;
+      }
+    });
+    saveLocal(bumped.length > 0 || added > 0);
+    if (bumped.length) toast(`🔔 偵測到新版本（已自動取消勾選）：${bumped.slice(0,3).join('、')}`);
+    else if (!silent) toast(`✓ Gemini 查版完成（新增 ${added} 款）`);
+  } catch (e) { if (!silent) toast('Gemini 自動查版失敗：' + e.message); }
+}
+
 function parseGeminiText(raw) {
   const cleaned = String(raw||'').trim(); if (!cleaned) return [];
   const cands = []; for (const m of cleaned.matchAll(/```(?:json)?\s*([\s\S]*?)```/gi)) cands.push(m[1].trim());
@@ -1005,7 +1120,7 @@ function mergeGeminiApps(incoming) {
   saveLocal(); toast(`✨ Gemini 同步完成：新增 ${add} 款、更新 ${upd} 款`);
 }
 
-const openGemini = () => { document.getElementById('gem-api-key').value = localStorage.getItem('appvault_gemini_key')||''; document.getElementById('gemini-modal').style.display='grid'; };
+const openGemini = () => { document.getElementById('gem-api-key').value = localStorage.getItem('appvault_gemini_key')||''; document.getElementById('gem-auto-start').checked = Boolean(prefs.autoGeminiOnStart); document.getElementById('gemini-modal').style.display='grid'; };
 document.getElementById('btn-gemini-hero').onclick = openGemini;
 document.getElementById('btn-gemini-side').onclick = openGemini;
 document.getElementById('gem-close').onclick = () => document.getElementById('gemini-modal').style.display='none';
@@ -1017,10 +1132,10 @@ document.getElementById('gem-open-prompt').onclick = async () => {
 document.getElementById('gem-paste').onclick = async () => { try { document.getElementById('gem-input').value = await navigator.clipboard.readText(); } catch {} };
 document.getElementById('gem-parse-json').onclick = () => { const p = parseGeminiText(document.getElementById('gem-input').value); if (!p.length) return toast('未偵測到 JSON'); mergeGeminiApps(p); document.getElementById('gemini-modal').style.display='none'; };
 document.getElementById('gem-ai-extract').onclick = async () => {
-  const k = document.getElementById('gem-api-key').value.trim(), txt = document.getElementById('gem-input').value.trim(); if (!k||!txt) return toast('請填入 API Key 與文字');
+  prefs.autoGeminiOnStart = document.getElementById('gem-auto-start').checked; savePrefs(); const k = document.getElementById('gem-api-key').value.trim(); if (k) localStorage.setItem('appvault_gemini_key', k); const txt = document.getElementById('gem-input').value.trim(); if (!k||!txt) return toast('請填入 API Key 與文字');
   localStorage.setItem('appvault_gemini_key', k); toast('呼叫 Gemini 2.5 Flash 中...');
   try {
-    const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(k)}`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ contents:[{ parts:[{ text:`萃取以下內容中的所有自製 App，只回覆標準 JSON 陣列（name, version, createdDate, category, usageGuide, supportsDesktopSync, isPublishedOnGitHub, githubUrl, applicationId, notes）：\n${txt}` }] }] }) });
+    const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${encodeURIComponent(k)}`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ contents:[{ parts:[{ text:`萃取以下內容中的所有自製 App，只回覆標準 JSON 陣列（name, version, createdDate, category, usageGuide, supportsDesktopSync, isPublishedOnGitHub, githubUrl, applicationId, notes）：\n${txt}` }] }] }) });
     if (!r.ok) throw new Error('HTTP '+r.status);
     const d = await r.json(), p = parseGeminiText(d.candidates?.[0]?.content?.parts?.[0]?.text||''); if (!p.length) throw new Error('無結果');
     mergeGeminiApps(p); document.getElementById('gemini-modal').style.display='none';
@@ -1105,7 +1220,7 @@ document.getElementById('btn-todo-md').onclick = async () => {
 };
 
 function download(blob, name){ const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name; a.click(); }
-document.getElementById('btn-export-json').onclick = () => download(new Blob([JSON.stringify({schemaVersion:6,exportedAt:Date.now(),customCategories:customCats,apps},null,2)],{type:'application/json'}),`AppVault_${new Date().toISOString().slice(0,16).replace(/[-T:]/g,'')}.json`);
+document.getElementById('btn-export-json').onclick = () => download(new Blob([JSON.stringify({schemaVersion:8,exportedAt:Date.now(),customCategories:customCats,apps},null,2)],{type:'application/json'}),`AppVault_${new Date().toISOString().slice(0,16).replace(/[-T:]/g,'')}.json`);
 document.getElementById('btn-export-csv').onclick = () => { const esc=s=>`"${String(s||'').replace(/"/g,'""')}"`; const r=['名稱,分類,版本,建立日期,介紹用法,已發GitHub,Actions狀態,手機已裝,平板已裝,桌面同步,同步ID,ApplicationId,KeystoreAlias,GitHub連結,備註',...activeApps().map(a=>[esc(a.name),esc(a.category),esc(a.version),esc(a.createdDate),esc(a.usageGuide),a.isPublishedOnGitHub?'是':'否',esc(a.actionsStatus),a.isInstalledOnPhone?'是':'否',a.isInstalledOnTablet?'是':'否',a.supportsDesktopSync?'是':'否',esc(a.syncId),esc(a.applicationId),esc(a.keystoreAlias),esc(a.githubUrl),esc(a.notes)].join(','))]; download(new Blob(['\uFEFF'+r.join('\n')],{type:'text/csv'}),`AppVault_${todayStr()}.csv`); };
 document.getElementById('btn-import-json').onclick = () => document.getElementById('file-input').click();
 document.getElementById('file-input').onchange = async e => {
@@ -1132,7 +1247,7 @@ window.addEventListener('keydown', e => {
 });
 
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js');
-renderCategories(); loadEditor(null); render();
+renderCategories(); loadEditor(null); render(); if (prefs.autoSync && localStorage.getItem('appvault_gemini_key')) { autoGeminiCheckVersions(true); } if (prefs.autoGeminiOnStart && localStorage.getItem('appvault_gemini_key')) { autoGeminiCheckVersions(true); }
 if (localStorage.getItem('appvault_gist_token') && localStorage.getItem('appvault_gist_id')) {
   setSyncStatus('synced', '雲端已同步');
   if (prefs.autoSync) smartMergePull(true);

@@ -348,7 +348,8 @@ fun AppVaultRootScreen(vm: AppVaultViewModel, isWideScreen: Boolean) {
                                     SyncState.IDLE -> MaterialTheme.colorScheme.onSurfaceVariant
                                 }
                                 Box(Modifier.size(7.dp).clip(CircleShape).background(dotColor))
-                                Text(vm.syncState.label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                val gemTag = if (vm.geminiChecking) " · Gemini 查版中" else if (vm.lastGeminiCheckLabel.isNotBlank()) " · Gemini ${vm.lastGeminiCheckLabel}" else ""
+                                Text("${vm.syncState.label}$gemTag", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
                         }
                     },
@@ -930,7 +931,45 @@ fun AppVaultRootScreen(vm: AppVaultViewModel, isWideScreen: Boolean) {
                         Text(if (showApiSettings) "隱藏 Gemini API 直連 ▲" else "進階：Gemini API 智慧萃取任意文字 ▼")
                     }
                     if (showApiSettings) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("登入／開啟自動連 Gemini 查新版", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodySmall)
+                                Text("有新版本自動更新版號並取消「最新」勾選", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Switch(
+                                checked = vm.autoGeminiOnStart,
+                                onCheckedChange = { vm.autoGeminiOnStart = it; vm.saveUiPrefs(context) }
+                            )
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("登入自動連 Gemini 查新版＆比對吻合", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodySmall)
+                                Text("吻合自動打勾；有新版本自動取消勾選", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Switch(
+                                checked = vm.autoGeminiOnStart,
+                                onCheckedChange = { vm.autoGeminiOnStart = it; vm.saveUiPrefs(context) }
+                            )
+                        }
                         OutlinedTextField(value = apiKeyInput, onValueChange = { apiKeyInput = it }, label = { Text("Gemini API Key") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                        OutlinedButton(
+                            onClick = {
+                                vm.saveGeminiApiKey(context, apiKeyInput, showFeedback = false)
+                                vm.autoCheckLatestVersionsFromGemini(context, silent = false)
+                                showGeminiDialog = false
+                            },
+                            enabled = apiKeyInput.isNotBlank() && !vm.geminiChecking,
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text("立即自動查版並比對手機現裝版本") }
+                        OutlinedButton(
+                            onClick = {
+                                vm.saveGeminiApiKey(context, apiKeyInput, showFeedback = false)
+                                vm.autoCheckLatestVersionsFromGemini(context, silent = false)
+                                showGeminiDialog = false
+                            },
+                            enabled = apiKeyInput.isNotBlank() && !vm.geminiChecking,
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text("立即自動檢查所有 App 最新版本") }
                         Button(
                             onClick = {
                                 vm.saveGeminiApiKey(context, apiKeyInput, showFeedback = false)
@@ -1380,8 +1419,74 @@ fun AppRecordCard(
                                 modifier = Modifier.weight(1f, fill = false)
                             )
                             Spacer(Modifier.width(6.dp))
+                            val gemVer = app.effectiveGeminiVersion()
+                            val phoneVerLabel = if (app.installedPhoneVersion.isNotBlank()) "手機v${app.installedPhoneVersion}" else "手機未裝"
+                            val matched = app.isPhoneVersionMatched()
                             Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = RoundedCornerShape(6.dp)) {
-                                Text("v${app.version}", modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold)
+                                Text("Gemini v$gemVer", modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold)
+                            }
+                            Spacer(Modifier.width(4.dp))
+                            Surface(
+                                color = if (matched) Color(0xFF10B981).copy(alpha = 0.14f) else Color(0xFFEF4444).copy(alpha = 0.14f),
+                                shape = RoundedCornerShape(6.dp)
+                            ) {
+                                Text(
+                                    phoneVerLabel,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = if (matched) Color(0xFF10B981) else Color(0xFFEF4444)
+                                )
+                            }
+                            Spacer(Modifier.width(4.dp))
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (matched) Color(0xFF10B981).copy(alpha = 0.20f) else Color(0xFFF59E0B).copy(alpha = 0.20f),
+                                modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { onTogglePhone() }
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        if (matched) Icons.Default.CheckBox else Icons.Default.CheckBoxOutlineBlank,
+                                        contentDescription = if (matched) "版本已吻合" else "版本不吻合需更新",
+                                        tint = if (matched) Color(0xFF10B981) else Color(0xFFF59E0B),
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                    Spacer(Modifier.width(3.dp))
+                                    Text(
+                                        if (matched) "吻合" else "需更新",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (matched) Color(0xFF10B981) else Color(0xFFF59E0B)
+                                    )
+                                }
+                            }
+                            Spacer(Modifier.width(6.dp))
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (app.isInstalledOnPhone) Color(0xFF10B981).copy(alpha = 0.18f) else Color(0xFFF59E0B).copy(alpha = 0.18f),
+                                modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { onTogglePhone() }
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        if (app.isInstalledOnPhone) Icons.Default.CheckBox else Icons.Default.CheckBoxOutlineBlank,
+                                        contentDescription = "已更新至最新版本",
+                                        tint = if (app.isInstalledOnPhone) Color(0xFF10B981) else Color(0xFFF59E0B),
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                    Spacer(Modifier.width(3.dp))
+                                    Text(
+                                        if (app.isInstalledOnPhone) "最新" else "待確認",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (app.isInstalledOnPhone) Color(0xFF10B981) else Color(0xFFF59E0B)
+                                    )
+                                }
                             }
                             // GitHub Actions 編譯狀態燈號
                             if (app.actionsStatus.isNotBlank()) {

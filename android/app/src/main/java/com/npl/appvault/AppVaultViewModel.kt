@@ -54,6 +54,9 @@ class AppVaultViewModel : ViewModel() {
     // 自動化同步與背景檢查
     var autoSyncEnabled by mutableStateOf(true)
     var bgCheckEnabled by mutableStateOf(true)
+    var autoGeminiOnStart by mutableStateOf(true)
+    var geminiChecking by mutableStateOf(false)
+    var lastGeminiCheckLabel by mutableStateOf("")
     var syncState by mutableStateOf(SyncState.IDLE)
     var isSyncing by mutableStateOf(false)
     var snackbarRequest by mutableStateOf<SnackbarRequest?>(null)
@@ -77,6 +80,176 @@ class AppVaultViewModel : ViewModel() {
     fun trashApps(): List<AppRecord> = apps.filter { it.deletedAt != null }.sortedByDescending { it.deletedAt }
     fun focusCount(): Int = activeApps().count { it.needsFocusAttention() }
 
+
+    // ==================== 一登入／開啟自動連上 Gemini 查最新版本（偵測升版自動取消已裝勾選） ====================
+    fun autoCheckLatestVersionsFromGemini(context: Context, silent: Boolean = true) {
+        if (geminiApiKey.isBlank()) {
+            if (!silent) showToast("請先在「連動 Gemini 設定」填入 Gemini API Key 以啟用自動查版")
+            return
+        }
+        if (geminiChecking) return
+        geminiChecking = true
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val existingSummary = activeApps().joinToString("、") {
+                        "${it.name}(目前v${it.version}, 建立:${it.createdDate}, 包名:${it.applicationId})"
+                    }
+                    val endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=$geminiApiKey"
+                    val prompt = """你是個人的 App 版本追蹤助理。請針對以下我開發的 Apps，查詢或回報它們目前最新的版本號（若沒有最新變動則保留原版本號），並補齊建立日期與簡短介紹用法。
+請只輸出一個標準 JSON 陣列（可用 ```json 包起來），每個項目包含：
+name, version, createdDate (YYYY-MM-DD), category, usageGuide (1-2句用法), supportsDesktopSync (boolean), isPublishedOnGitHub (boolean), githubUrl, applicationId, notes。
+
+現有 Apps 清單：
+$existingSummary"""
+                    val payloadObj = buildJsonObject {
+                        putJsonArray("contents") {
+                            addJsonObject {
+                                putJsonArray("parts") {
+                                    addJsonObject { put("text", prompt) }
+                                }
+                            }
+                        }
+                    }
+                    val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+                        requestMethod = "POST"
+                        setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                        doOutput = true
+                        connectTimeout = 15000
+                        readTimeout = 20000
+                    }
+                    conn.outputStream.use { it.write(payloadObj.toString().toByteArray(Charsets.UTF_8)) }
+                    if (conn.responseCode !in 200..299) error("HTTP ${conn.responseCode}")
+                    val raw = conn.inputStream.bufferedReader().use { it.readText() }
+                    val replyText = json.parseToJsonElement(raw).jsonObject["candidates"]?.jsonArray?.firstOrNull()?.jsonObject
+                        ?.get("content")?.jsonObject?.get("parts")?.jsonArray?.firstOrNull()?.jsonObject
+                        ?.get("text")?.jsonPrimitive?.content ?: error("Gemini 無回傳內容")
+                    parseGeminiRecordsFromText(replyText)
+                }
+            }
+            geminiChecking = false
+            result.onSuccess { items ->
+                if (items.isEmpty()) {
+                    if (!silent) showToast("Gemini 未回傳可解析的版本資料")
+                    return@onSuccess
+                }
+                val current = apps.toMutableList()
+                var nextOrder = (current.maxOfOrNull { it.sortOrder } ?: -1) + 1
+                var bumpedApps = mutableListOf<String>()
+                var addedCount = 0
+
+                val installedNow = queryUserInstalledApks(context)
+                for (inc in items) {
+                    val incNorm = normalizeAppNameKey(inc.name)
+                    val idx = current.indexOfFirst { old ->
+                        old.deletedAt == null && (
+                            old.name.equals(inc.name, ignoreCase = true) ||
+                                (inc.applicationId.isNotBlank() && old.applicationId.equals(inc.applicationId, true)) ||
+                                (incNorm.isNotBlank() && (normalizeAppNameKey(old.name) == incNorm ||
+                                    normalizeAppNameKey(old.name).contains(incNorm) ||
+                                    incNorm.contains(normalizeAppNameKey(old.name))))
+                        )
+                    }
+                    if (idx >= 0) {
+                        val old = current[idx]
+                        val matchedPkg = installedNow.find { pkg ->
+                            (old.applicationId.isNotBlank() && pkg.packageName.equals(old.applicationId, true)) ||
+                                (inc.applicationId.isNotBlank() && pkg.packageName.equals(inc.applicationId, true)) ||
+                                (incNorm.isNotBlank() && normalizeAppNameKey(pkg.label) == incNorm)
+                        }
+                        val phoneVer = matchedPkg?.versionName?.ifBlank { old.installedPhoneVersion } ?: old.installedPhoneVersion
+                        val latestVer = inc.version.trim().ifBlank { old.version.trim() }
+                        val isNewer = latestVer.isNotBlank() && compareSemanticVersions(latestVer, old.version) > 0
+                        val newLog = if (isNewer) {
+                            bumpedApps.add("${old.name} 手機v${phoneVer.ifBlank { "?" }} / Gemini v$latestVer")
+                            listOf(
+                                VersionHistoryEntry(
+                                    version = old.version,
+                                    notes = old.notes.ifBlank { "Gemini 最新版本 v$latestVer" },
+                                    timestamp = old.updatedAt
+                                )
+                            ) + old.changelog
+                        } else old.changelog
+
+                        val matchesLatest = if (phoneVer.isNotBlank()) {
+                            compareSemanticVersions(phoneVer, latestVer) == 0
+                        } else {
+                            if (isNewer) false else old.isInstalledOnPhone && compareSemanticVersions(old.version, latestVer) == 0
+                        }
+
+                        val b64 = matchedPkg?.iconBitmap?.let { bitmapToBase64(it, 72) } ?: old.iconBase64
+                        val acc = matchedPkg?.iconBitmap?.let { extractDominantColorHex(it) }?.ifBlank { old.accentHex } ?: old.accentHex
+
+                        current[idx] = old.copy(
+                            version = latestVer.ifBlank { old.version },
+                            geminiLatestVersion = latestVer,
+                            installedPhoneVersion = phoneVer,
+                            iconBase64 = b64.ifBlank { old.iconBase64 },
+                            accentHex = acc,
+                            createdDate = old.createdDate.ifBlank { matchedPkg?.createdDate ?: inc.createdDate },
+                            category = inc.category.ifBlank { old.category },
+                            usageGuide = inc.usageGuide.ifBlank { old.usageGuide },
+                            notes = if (isNewer && inc.notes.isNotBlank()) inc.notes else old.notes.ifBlank { inc.notes },
+                            githubUrl = old.githubUrl.ifBlank { inc.githubUrl },
+                            applicationId = old.applicationId.ifBlank { matchedPkg?.packageName ?: inc.applicationId },
+                            syncId = old.syncId.ifBlank { inc.syncId },
+                            supportsDesktopSync = old.supportsDesktopSync || inc.supportsDesktopSync,
+                            isPublishedOnGitHub = old.isPublishedOnGitHub || inc.isPublishedOnGitHub,
+                            isInstalledOnPhone = matchesLatest,
+                            isInstalledOnTablet = if (isNewer) false else old.isInstalledOnTablet,
+                            changelog = newLog,
+                            geminiUpdatedAt = System.currentTimeMillis(),
+                            updatedAt = if (isNewer) System.currentTimeMillis() else old.updatedAt
+                        )
+                    } else {
+                        val matchedPkg = installedNow.find { pkg ->
+                            (inc.applicationId.isNotBlank() && pkg.packageName.equals(inc.applicationId, true)) ||
+                                (incNorm.isNotBlank() && normalizeAppNameKey(pkg.label) == incNorm)
+                        }
+                        val phoneVer = matchedPkg?.versionName ?: ""
+                        val latestVer = inc.version.trim().ifBlank { "1.0" }
+                        val matchesLatest = phoneVer.isNotBlank() && compareSemanticVersions(phoneVer, latestVer) == 0
+                        current.add(
+                            inc.copy(
+                                id = java.util.UUID.randomUUID().toString(),
+                                version = latestVer,
+                                geminiLatestVersion = latestVer,
+                                installedPhoneVersion = phoneVer,
+                                applicationId = inc.applicationId.ifBlank { matchedPkg?.packageName ?: "" },
+                                iconBase64 = matchedPkg?.iconBitmap?.let { bitmapToBase64(it, 72) } ?: "",
+                                accentHex = matchedPkg?.iconBitmap?.let { extractDominantColorHex(it) } ?: "",
+                                createdDate = inc.createdDate.ifBlank { matchedPkg?.createdDate ?: todayDateString() },
+                                isInstalledOnPhone = matchesLatest,
+                                isInstalledOnTablet = false,
+                                sortOrder = nextOrder++,
+                                geminiUpdatedAt = System.currentTimeMillis(),
+                                updatedAt = System.currentTimeMillis(),
+                                deletedAt = null
+                            )
+                        )
+                        addedCount++
+                    }
+                    if (inc.category.isNotBlank() && !allCategories().contains(inc.category)) {
+                        customCategories = customCategories + inc.category
+                    }
+                }
+
+                apps = current
+                lastGeminiCheckLabel = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
+                saveUiPrefs(context)
+                persist(context, triggerAutoSync = bumpedApps.isNotEmpty() || addedCount > 0)
+
+                if (bumpedApps.isNotEmpty()) {
+                    showToast("🔔 偵測到新版本（已自動取消「最新」勾選）：${bumpedApps.take(3).joinToString("、")}")
+                } else if (!silent) {
+                    showToast("✓ Gemini 查版完成（新增 $addedCount 款，其餘已是記錄最新版本）")
+                }
+            }.onFailure { err ->
+                if (!silent) showToast("Gemini 自動查版失敗：${err.message}")
+            }
+        }
+    }
+
     fun load(context: Context) {
         if (initialized) return
         initialized = true
@@ -85,6 +258,8 @@ class AppVaultViewModel : ViewModel() {
         gistId = prefs.getString("gist_id", "") ?: ""
         geminiApiKey = prefs.getString("gemini_api_key", "") ?: ""
         autoSyncEnabled = prefs.getBoolean("auto_sync", true)
+        autoGeminiOnStart = prefs.getBoolean("auto_gemini_start", true)
+        lastGeminiCheckLabel = prefs.getString("last_gemini_check", "") ?: ""
         bgCheckEnabled = prefs.getBoolean("bg_check", true)
         compactCardMode = prefs.getBoolean("compact_mode", true)
         statsExpanded = prefs.getBoolean("stats_expanded", true)
@@ -107,6 +282,10 @@ class AppVaultViewModel : ViewModel() {
 
         ReleaseCheckWorker.schedule(context, bgCheckEnabled)
 
+        if (autoGeminiOnStart && geminiApiKey.isNotBlank()) {
+            syncInstalledApks(context, silent = true)
+            autoCheckLatestVersionsFromGemini(context, silent = true)
+        }
         if (gistToken.isNotBlank() && gistId.isNotBlank()) {
             syncState = SyncState.SYNCED
             if (autoSyncEnabled) {
@@ -120,6 +299,8 @@ class AppVaultViewModel : ViewModel() {
     fun saveUiPrefs(context: Context) {
         context.getSharedPreferences(prefsName, Context.MODE_PRIVATE).edit()
             .putBoolean("auto_sync", autoSyncEnabled)
+            .putBoolean("auto_gemini_start", autoGeminiOnStart)
+            .putString("last_gemini_check", lastGeminiCheckLabel)
             .putBoolean("bg_check", bgCheckEnabled)
             .putBoolean("compact_mode", compactCardMode)
             .putBoolean("stats_expanded", statsExpanded)
@@ -738,7 +919,7 @@ class AppVaultViewModel : ViewModel() {
         viewModelScope.launch {
             val result = withContext(Dispatchers.IO) {
                 runCatching {
-                    val endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=$geminiApiKey"
+                    val endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=$geminiApiKey"
                     val prompt = """請從以下內容萃取出所有提及的自製 App / APK / 網頁工具，並只回覆一個 JSON 陣列（不要多餘說明）。
 每個項目包含欄位：name, version, createdDate (YYYY-MM-DD，沒有請填 ${todayDateString()}), category (教學工具/個人工具/生活記錄/系統工具/AI 與開發/相片媒體/其他), usageGuide (1-2句介紹用法), supportsDesktopSync (boolean), isPublishedOnGitHub (boolean), githubUrl, applicationId, notes。
 

@@ -1,6 +1,6 @@
 {
-  "name": "AppVault v1.8 開發總管",
-  "short_name": "AppVault v1.8",
+  "name": "AppVault v2.0 開發總管",
+  "short_name": "AppVault v2.0",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#0B1120",

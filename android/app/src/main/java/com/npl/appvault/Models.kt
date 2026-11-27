@@ -50,6 +50,7 @@ data class AppRecord(
     val iconBase64: String = "",
     val accentHex: String = "",
     val installedPhoneVersion: String = "",
+    val geminiLatestVersion: String = "",
     val isPinned: Boolean = false,
     val isPublishedOnGitHub: Boolean = false,
     val isInstalledOnPhone: Boolean = false,
@@ -68,12 +69,13 @@ data class AppRecord(
     val changelog: List<VersionHistoryEntry> = emptyList(),
     val sortOrder: Int = 0,
     val updatedAt: Long = System.currentTimeMillis(),
-    val deletedAt: Long? = null
+    val deletedAt: Long? = null,
+    val geminiUpdatedAt: Long = 0L
 )
 
 @Serializable
 data class AppVaultBackup(
-    val schemaVersion: Int = 6,
+    val schemaVersion: Int = 8,
     val exportedAt: Long = System.currentTimeMillis(),
     val customCategories: List<String> = emptyList(),
     val apps: List<AppRecord> = emptyList()
@@ -145,10 +147,23 @@ fun todayDateString(): String = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault
 
 fun timestampToDateString(ts: Long): String = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(ts))
 
+
+fun AppRecord.effectiveGeminiVersion(): String =
+    geminiLatestVersion.trim().ifBlank { version.trim() }
+
+fun AppRecord.isPhoneVersionMatched(): Boolean {
+    val targetVer = effectiveGeminiVersion()
+    if (targetVer.isBlank()) return isInstalledOnPhone
+    if (installedPhoneVersion.isNotBlank()) {
+        return compareSemanticVersions(installedPhoneVersion, targetVer) == 0
+    }
+    return isInstalledOnPhone && compareSemanticVersions(version, targetVer) == 0
+}
+
 fun AppRecord.needsFocusAttention(): Boolean =
     deletedAt == null && (
         !isPublishedOnGitHub ||
-            !isInstalledOnPhone ||
+            !isPhoneVersionMatched() ||
             (supportsDesktopSync && syncId.isBlank()) ||
             actionsStatus == "failure" ||
             (installedPhoneVersion.isNotBlank() && compareSemanticVersions(installedPhoneVersion, version) < 0)

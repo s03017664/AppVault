@@ -13,9 +13,9 @@ android {
         applicationId = "com.npl.appvault" // 固定不可更改，確保覆蓋安裝保留資料
         minSdk = 26
         targetSdk = 35
-        versionCode = 7
-        versionName = "1.8"
-        buildConfigField("String", "APP_VERSION_LABEL", "\"v1.8\"")
+        versionCode = 9
+        versionName = "2.0"
+        buildConfigField("String", "APP_VERSION_LABEL", "\"v2.0\"")
     }
 
     signingConfigs {
